@@ -1,0 +1,15 @@
+[Unit]
+Description=Twilio Activate Service
+After=docker.service
+Requires=docker.service
+
+[Service]
+WorkingDirectory=/opt/twilio/
+ExecStart=docker compose -f docker-compose.yml up
+ExecStop=docker compose -f docker-compose.yml down
+
+# Автоматический перезапуск при сбое
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

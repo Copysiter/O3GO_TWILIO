@@ -1,0 +1,11 @@
+[16-Feb-2025 18:27:54 Europe/Moscow] Cleaned phone number: 15075805320 -> 15075805320
+[16-Feb-2025 18:27:54 Europe/Moscow] Starting delete_number command for account: 600, number: 15075805320
+[16-Feb-2025 18:27:54 Europe/Moscow] API Error: Number not found in database
+[16-Feb-2025 18:28:36 Europe/Moscow] PHP Fatal error:  Uncaught Error: Call to undefined function executeCurlRequest() in /var/www/u2811978/data/www/shopnoname.online/syrdtunrytsbstrybearsyaserveratcv/api3.php:209
+Stack trace:
+#0 {main}
+  thrown in /var/www/u2811978/data/www/shopnoname.online/syrdtunrytsbstrybearsyaserveratcv/api3.php on line 209
+[16-Feb-2025 20:39:12 Europe/Moscow] PHP Fatal error:  Uncaught Error: Call to undefined function executeCurlRequest() in /var/www/u2811978/data/www/shopnoname.online/syrdtunrytsbstrybearsyaserveratcv/api3.php:192
+Stack trace:
+#0 {main}
+  thrown in /var/www/u2811978/data/www/shopnoname.online/syrdtunrytsbstrybearsyaserveratcv/api3.php on line 192

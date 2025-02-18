@@ -69,8 +69,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
     } catch (Exception $e) {
         $error = $e->getMessage();
-        print $e;
-        error_log($error);
         logAdminAction($mysqli ?? null, 0, 'login_failed', $error);
     }
 }

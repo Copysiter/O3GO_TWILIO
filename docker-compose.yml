@@ -3,7 +3,7 @@ services:
   web:
     build: .
     ports:
-      - "7778:80"
+      - "8000:80"
     depends_on:
       - db
 
@@ -33,7 +33,7 @@ services:
       PHP_UPLOAD_MAX_FILESIZE: 50M
       PHP_POST_MAX_SIZE: 50M
     ports:
-      - "7779:80"
+      - "8001:80"
 
 volumes:
   mysql_data:

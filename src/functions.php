@@ -49,8 +49,6 @@ function getDB() {
         $mysqli->set_charset("utf8mb4");
         return $mysqli;
     } catch (Exception $e) {
-        print $e;
-        print '<br />';
         error_log($e->getMessage());
         throw new Exception('System error');
     }
@@ -733,7 +731,7 @@ function checkTwilioAccount($account_sid, $auth_token, $proxy = null) {
         return ['status' => 'error', 'error' => $e->getMessage()];
     }
 }
-
+/*
 // Update daily statistics
 function updateDailyStats($mysqli) {
     try {
@@ -768,6 +766,78 @@ function updateDailyStats($mysqli) {
         );
         
         return $stmt->execute();
+    } catch (Exception $e) {
+        error_log("Error updating daily stats: " . $e->getMessage());
+        return false;
+    }
+}
+*/
+// Update daily statistics with proper SMS counting
+function updateDailyStats($mysqli) {
+    try {
+        $date = date('Y-m-d');
+        
+        // Get current stats with proper SMS counting
+        $result = $mysqli->query("
+            SELECT 
+                COUNT(*) as total_accounts,
+                SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_accounts,
+                SUM(numbers_count) as total_numbers,
+                (
+                    SELECT COALESCE(SUM(total_sms_count), 0)
+                    FROM phone_numbers
+                    WHERE status = 'active'
+                ) as total_sms,
+                (
+                    SELECT COALESCE(SUM(daily_sms_count), 0)
+                    FROM phone_numbers
+                    WHERE status = 'active'
+                    AND last_sms_date = CURDATE()
+                ) as today_sms
+            FROM twilio_accounts
+            WHERE status != 'deleted'
+        ");
+        
+        $stats = $result->fetch_assoc();
+        
+        // Обновляем или добавляем статистику за текущий день
+        $stmt = $mysqli->prepare("
+            INSERT INTO daily_stats (
+                date, 
+                active_accounts, 
+                total_sms, 
+                total_calls,
+                today_sms
+            ) VALUES (
+                ?, ?, ?, 0, ?
+            ) ON DUPLICATE KEY UPDATE
+                active_accounts = VALUES(active_accounts),
+                total_sms = VALUES(total_sms),
+                today_sms = VALUES(today_sms)
+        ");
+        
+        $stmt->bind_param('siii', 
+            $date, 
+            $stats['active_accounts'],
+            $stats['total_sms'],
+            $stats['today_sms']
+        );
+        
+        $result = $stmt->execute();
+        
+        // Обновляем счетчики в twilio_accounts
+        $mysqli->query("
+            UPDATE twilio_accounts ta
+            SET sms_count = (
+                SELECT COALESCE(SUM(total_sms_count), 0)
+                FROM phone_numbers pn
+                WHERE pn.account_id = ta.numeric_id
+                AND pn.status = 'active'
+            )
+            WHERE status = 'active'
+        ");
+        
+        return $result;
     } catch (Exception $e) {
         error_log("Error updating daily stats: " . $e->getMessage());
         return false;
@@ -970,4 +1040,22 @@ function getTotalSMSCount($mysqli, $account_id = null) {
     $row = $result->fetch_assoc();
     
     return $account_id ? ($row['total_sms_count'] ?? 0) : ($row['total'] ?? 0);
+}
+// Функция подсчета сообщений для номера
+function countMessagesForNumber($messages, $phone_number) {
+    if (empty($messages)) {
+        return 0;
+    }
+    
+    $count = 0;
+    $clean_number = cleanPhoneNumber($phone_number);
+    
+    foreach ($messages as $message) {
+        if (cleanPhoneNumber($message['from']) === $clean_number || 
+            cleanPhoneNumber($message['to']) === $clean_number) {
+            $count++;
+        }
+    }
+    
+    return $count;
 }
