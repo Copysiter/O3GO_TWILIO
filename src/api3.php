@@ -603,12 +603,12 @@ if ($account_id > 0) {
             
             if (!$number_info) {
                 error_log("Number not found in database: {$phone_number}");
-//                 throw new Exception('Number not found in database');
+                throw new Exception('Number not found in database');
             }
             
-            if (is_array($number_info) && in_array('status', $number_info) && $number_info['status'] !== 'active') {
+            if ($number_info['status'] !== 'active') {
                 error_log("Number is already deleted or inactive: {$phone_number}");
-//                 throw new Exception('Number is already deleted or inactive');
+                throw new Exception('Number is already deleted or inactive');
             }
             
             // Начинаем транзакцию
