@@ -603,7 +603,7 @@ if ($account_id > 0) {
             
             if (!$number_info) {
                 error_log("Number not found in database: {$phone_number}");
-                throw new Exception('Number not found in database');
+//                 throw new Exception('Number not found in database');
             }
             
             if ($number_info['status'] !== 'active') {
