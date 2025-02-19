@@ -606,9 +606,9 @@ if ($account_id > 0) {
 //                 throw new Exception('Number not found in database');
             }
             
-            if ($number_info['status'] !== 'active') {
+            if (in_array('status', $number_info) && $number_info['status'] !== 'active') {
                 error_log("Number is already deleted or inactive: {$phone_number}");
-                throw new Exception('Number is already deleted or inactive');
+//                 throw new Exception('Number is already deleted or inactive');
             }
             
             // Начинаем транзакцию
