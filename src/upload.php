@@ -430,6 +430,8 @@ if (isset($_GET['action'])) {
                 while (true) {
                     const processResponse = await fetch('?action=process');
                     const processData = await processResponse.json();
+
+                    console.log(processData);
                     
                     if (processData.error) {
                         throw new Error(processData.error);
@@ -444,8 +446,13 @@ if (isset($_GET['action'])) {
                     // Добавляем результат в лог
                     const logEntry = document.createElement('div');
                     logEntry.className = 'border-l-4 p-2 ' + 
-                        (processData.result.status === 'success' ? 'border-green-500' : 'border-red-500');
-                    logEntry.textContent = `Line ${currentLine}: ${processData.result.message}`;
+                        (processData.result != undefined && processData.result.status === 'success' ? 'border-green-500' : 'border-red-500');
+                    if (processData.result != undefined) {
+                        logEntry.textContent = `Line ${currentLine}: ${processData.result.message}`;
+                    }
+                    if (processData.errors != undefined) {
+                        logEntry.textContent = `Line ${currentLine}: ${processData.errors[currentLine]}`;
+                    }
                     log.appendChild(logEntry);
                     log.scrollTop = log.scrollHeight;
                     

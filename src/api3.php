@@ -114,14 +114,35 @@ try {
     }
 
     // Функции для SMS
-    function getTwilioMessages($account_sid, $auth_token, $proxy) {
-        return executeCurlRequest(
-            "https://api.twilio.com/2010-04-01/Accounts/{$account_sid}/Messages.json?PageSize=1000",
-            $account_sid,
-            $auth_token,
-            $proxy
-        );
+    function getTwilioMessages($account_sid, $auth_token, $proxy, $phone_number = null) {
+        $url = "https://api.twilio.com/2010-04-01/Accounts/{$account_sid}/Messages.json?PageSize=1000";
+        if ($phone_number) {
+            $url .= "&To={$phone_number}";
+        }
+        return executeCurlRequest($url, $account_sid, $auth_token, $proxy);
     }
+
+    function deleteTwilioMessages($account_sid, $auth_token, $proxy) {
+        $messages = getTwilioMessages($account_sid, $auth_token, $proxy);
+        if ($messages['status'] !== 'success') {
+            return $messages;
+        }
+
+        $deleted = 0;
+        $failed = 0;
+        foreach ($messages['data']['messages'] ?? [] as $message) {
+            $result = executeCurlRequest(
+                "https://api.twilio.com/2010-04-01/Accounts/{$account_sid}/Messages/{$message['sid']}.json",
+                $account_sid,
+                $auth_token,
+                $proxy,
+                'DELETE'
+            );
+            $result['status'] === 'success' ? $deleted++ : $failed++;
+        }
+
+        return ['status' => 'success', 'deleted' => $deleted, 'failed' => $failed];
+   }
 
     // Функция поиска доступных номеров
     function searchAvailableNumbers($account_sid, $auth_token, $proxy, $country, $prefix = '') {
@@ -275,6 +296,19 @@ if ($account_id > 0) {
             $response['accounts'] = $result->fetch_all(MYSQLI_ASSOC);
             break;
 
+        case 'get_status':
+           $response['account'] = [
+               'id' => $account['numeric_id'],
+               'account_sid' => $account['account_sid'],
+               'status' => $account['status'],
+               'numbers_count' => $account['numbers_count'],
+               'sms_count' => $account['sms_count'],
+               'balance' => $account['balance'],
+               'proxy' => $account['proxy_address'],
+               'last_check' => $account['last_check'],
+           ];
+           break;
+
         case 'get_numbers':
             if (!isset($_GET['country'])) {
                 throw new Exception('Country code is required');
@@ -297,8 +331,8 @@ if ($account_id > 0) {
                 $country,
                 $prefix
             );
-            
-            if ($available_numbers['status'] !== 'success' || 
+
+            if ($available_numbers['status'] !== 'success' ||
                 empty($available_numbers['data']['available_phone_numbers'])) {
                 $response['result'] = [
                     'status' => 'error',
@@ -306,12 +340,12 @@ if ($account_id > 0) {
                 ];
                 break;
             }
-            
+
             // Берем первый доступный номер
             $phone_number = $available_numbers['data']['available_phone_numbers'][0]['phone_number'];
-            
+
             error_log("Found number to buy: " . $phone_number);
-            
+
             // Покупаем номер
             $result = buyNumber(
                 $account['account_sid'],
@@ -319,38 +353,38 @@ if ($account_id > 0) {
                 $account['proxy_address'],
                 $phone_number
             );
-            
+
             if ($result['status'] === 'success') {
                 $clean_number = cleanPhoneNumber($phone_number);
-                
+
                 // Начинаем транзакцию
                 $mysqli->begin_transaction();
-                
+
                 try {
                     // Добавляем номер в базу
                     $stmt = $mysqli->prepare("
                         INSERT INTO phone_numbers (
-                            account_id, 
-                            phone_number, 
+                            account_id,
+                            phone_number,
                             status,
                             date_added
                         ) VALUES (?, ?, 'active', NOW())
-                        ON DUPLICATE KEY UPDATE 
+                        ON DUPLICATE KEY UPDATE
                             status = 'active',
                             date_deleted = NULL
                     ");
                     $stmt->bind_param("is", $account_id, $clean_number);
                     $stmt->execute();
-                    
+
                     // Увеличиваем счетчик номеров
                     $mysqli->query("
-                        UPDATE twilio_accounts 
-                        SET numbers_count = numbers_count + 1 
+                        UPDATE twilio_accounts
+                        SET numbers_count = numbers_count + 1
                         WHERE numeric_id = {$account_id}
                     ");
-                    
+
                     $mysqli->commit();
-                    
+
                     $result['phone_number'] = $clean_number;
                     error_log("Successfully bought and saved number: " . $clean_number);
                 } catch (Exception $e) {
@@ -366,81 +400,93 @@ if ($account_id > 0) {
             break;
 
         case 'show_numbers':
-    if (!isset($_GET['account_id'])) {
-        throw new Exception('Account ID is required');
-    }
-    $account_id = (int)$_GET['account_id'];
-    
-    // Получаем информацию об аккаунте с номерами
-    $stmt = $mysqli->prepare("
-        SELECT t.*, p.phone_number, p.status as phone_status, p.sms_count 
-        FROM twilio_accounts t
-        LEFT JOIN phone_numbers p ON t.numeric_id = p.account_id
-        WHERE t.numeric_id = ? AND t.status = 'active'
-    ");
-    $stmt->bind_param('i', $account_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $account = $result->fetch_assoc();
+            if (!isset($_GET['account_id'])) {
+                throw new Exception('Account ID is required');
+            }
+            $account_id = (int)$_GET['account_id'];
 
-    if (!$account) {
-        throw new Exception('Account not found');
-    }
-
-    if (empty($account['proxy_address'])) {
-        throw new Exception('No proxy configured for this account');
-    }
-
-    // Получаем актуальные номера от Twilio
-    $numbers_result = executeCurlRequest(
-        "https://api.twilio.com/2010-04-01/Accounts/{$account['account_sid']}/IncomingPhoneNumbers.json",
-        $account['account_sid'],
-        $account['auth_token'],
-        $account['proxy_address']
-    );
-    
-    // Получаем SMS для подсчета
-    $messages_result = getTwilioMessages($account['account_sid'], $account['auth_token'], $account['proxy_address']);
-    
-    if ($numbers_result['status'] === 'success' && isset($numbers_result['data']['incoming_phone_numbers'])) {
-        $active_numbers = [];
-        $messages = $messages_result['status'] === 'success' ? $messages_result['data']['messages'] : [];
-        
-        foreach ($numbers_result['data']['incoming_phone_numbers'] as $number) {
-            $clean_number = cleanPhoneNumber($number['phone_number']);
-            $sms_count = countMessagesForNumber($messages, $clean_number);
-            
-            $active_numbers[] = [
-                'phone_number' => $clean_number,
-                'status' => 'active',
-                'sms_count' => $sms_count
-            ];
-            
-            // Обновляем статистику в базе
-            updatePhoneNumberSmsStats($mysqli, $account_id, $clean_number, $sms_count);
-        }
-        
-        // Помечаем удаленные номера
-        if (!empty($active_numbers)) {
-            $active_numbers_list = array_map(function($n) { return $n['phone_number']; }, $active_numbers);
-            $numbers_str = "'" . implode("','", array_map([$mysqli, 'real_escape_string'], $active_numbers_list)) . "'";
-            $mysqli->query("
-                UPDATE phone_numbers 
-                SET status = 'deleted' 
-                WHERE account_id = {$account_id} 
-                AND phone_number NOT IN ({$numbers_str})
-                AND status = 'active'
+            // Получаем информацию об аккаунте с номерами
+            $stmt = $mysqli->prepare("
+                SELECT t.*, p.phone_number, p.status as phone_status, p.sms_count
+                FROM twilio_accounts t
+                LEFT JOIN phone_numbers p ON t.numeric_id = p.account_id
+                WHERE t.numeric_id = ? AND t.status = 'active'
             ");
-        }
-        
-        // Обновляем статистику аккаунта
-        updateAccountSmsStats($mysqli, $account_id);
-        
-        $response['numbers'] = $active_numbers;
-    } else {
-        $response['numbers'] = [];
-    }
-    break;
+            $stmt->bind_param('i', $account_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $account = $result->fetch_assoc();
+
+            if (!$account) {
+                throw new Exception('Account not found');
+            }
+
+            if (empty($account['proxy_address'])) {
+                throw new Exception('No proxy configured for this account');
+            }
+
+            // Получаем актуальные номера от Twilio
+            $numbers_result = executeCurlRequest(
+                "https://api.twilio.com/2010-04-01/Accounts/{$account['account_sid']}/IncomingPhoneNumbers.json",
+                $account['account_sid'],
+                $account['auth_token'],
+                $account['proxy_address']
+            );
+
+            // Получаем SMS для подсчета
+            $messages_result = getTwilioMessages($account['account_sid'], $account['auth_token'], $account['proxy_address']);
+
+            if ($numbers_result['status'] === 'success' && isset($numbers_result['data']['incoming_phone_numbers'])) {
+                $active_numbers = [];
+                $messages = $messages_result['status'] === 'success' ? $messages_result['data']['messages'] : [];
+
+                foreach ($numbers_result['data']['incoming_phone_numbers'] as $number) {
+                    $clean_number = cleanPhoneNumber($number['phone_number']);
+                    $sms_count = countMessagesForNumber($messages, $clean_number);
+
+                    $active_numbers[] = [
+                        'phone_number' => $clean_number,
+                        'status' => 'active',
+                        'sms_count' => $sms_count
+                    ];
+
+                    // Обновляем статистику в базе
+                    updatePhoneNumberSmsStats($mysqli, $account_id, $clean_number, $sms_count);
+                }
+
+                // Помечаем удаленные номера
+                if (!empty($active_numbers)) {
+                    $active_numbers_list = array_map(function($n) { return $n['phone_number']; }, $active_numbers);
+                    $numbers_str = "'" . implode("','", array_map([$mysqli, 'real_escape_string'], $active_numbers_list)) . "'";
+                    $mysqli->query("
+                        UPDATE phone_numbers
+                        SET status = 'deleted'
+                        WHERE account_id = {$account_id}
+                        AND phone_number NOT IN ({$numbers_str})
+                        AND status = 'active'
+                    ");
+                }
+
+                // Обновляем статистику аккаунта
+                updateAccountSmsStats($mysqli, $account_id);
+
+                $response['numbers'] = $active_numbers;
+            } else {
+                $response['numbers'] = [];
+            }
+            break;
+
+    case 'get_sms':
+           $messages = getTwilioMessages($account['account_sid'], $account['auth_token'], $account['proxy_address'], $_GET['phone_number'] ?? null);
+           $response['messages'] = $messages;
+
+           if ($messages['status'] === 'success' && isset($messages['data']['messages'])) {
+               $sms_count = count($messages['data']['messages']);
+               $stmt = $mysqli->prepare("UPDATE twilio_accounts SET sms_count = ? WHERE numeric_id = ?");
+               $stmt->bind_param("ii", $sms_count, $account_id);
+               $stmt->execute();
+           }
+           break;
 
         case 'delete_sms':
             error_log("Starting SMS deletion for account: " . $account_id);
@@ -536,7 +582,8 @@ if ($account_id > 0) {
             
             $response['balance'] = $balance;
             break;
-            case 'delete_number':
+
+        case 'delete_number':
             if (!isset($_GET['phone_number'])) {
                 throw new Exception('Phone number is required');
             }
